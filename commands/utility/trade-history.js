@@ -1,8 +1,15 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { SaleType } = require("../../models/sale-type.js");
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
+const  Chart  = require("chart.js");
+require('chartjs-adapter-moment');
 
 let connection;
+
+const width = 400; //px
+        const height = 400; //px
+        const backgroundColour = 'white'; // Uses https://www.w3schools.com/tags/canvas_fillstyle.asp
+        const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, backgroundColour});
 
 module.exports = {
     data: new SlashCommandBuilder().setName('chart').setDescription('gets item from db').addStringOption(option =>
@@ -12,10 +19,7 @@ module.exports = {
     ),
     async execute(interaction){
        
-        const width = 400; //px
-        const height = 400; //px
-        const backgroundColour = 'white'; // Uses https://www.w3schools.com/tags/canvas_fillstyle.asp
-        const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, backgroundColour});
+        
         
         //get the data from the db trades, price is the dataset, and the x axis is the date of the trade
         
@@ -59,12 +63,16 @@ module.exports = {
 
             //push price where saletype = 0
             if(trades[i].type == SaleType.InstantBuy){
-                inbPrices.push(trades[i].price);
+                inbPrices.push({ y: trades[i].price, x: new Date(trades[i].datetime).toISOString() });
                 sellProfit.push(trades[i].price - (trades[i].price * 0.02));
+                insPrices.push(null);
             } else {
                 insPrices.push(trades[i].price);
+                inbPrices.push({y: null, x: new Date(trades[i].datetime).toISOString()});
+                sellProfit.push(null);
             }
-            dates.push(new Date(trades[i].datetime).toLocaleDateString());
+
+            dates.push(new Date(trades[i].datetime).toISOString());
         }
 
         (async () => {
@@ -92,7 +100,35 @@ module.exports = {
                         data: sellProfit,
                     }]
                 },
-                options: {}
+                options: {
+                    spanGaps: true,
+                    scales: {
+                        x: {
+                            type: 'time', // Use a time scale for the x-axis
+                            time: {
+                                unit: 'day', // Display labels for each day
+                            },
+                            title: {
+                                display: true,
+                                text: 'Date', // Label for the x-axis
+                            },
+                            ticks: {
+                                major: {
+                                    font: {
+                                        style: 'bold',
+                                    },
+                                    color: '#FF0000',
+                                },
+                            },
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Price', // Label for the y-axis
+                            },
+                        },
+                    },
+                },
             };
             const image = await chartJSNodeCanvas.renderToBuffer(configuration);
 

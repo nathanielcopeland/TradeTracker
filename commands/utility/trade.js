@@ -162,7 +162,7 @@ const profit = {
         .addStringOption(option =>
             option.setName('item')
                 .setDescription('Item to calculate profit for')
-                .setRequired(true)
+                .setRequired(false) // Make the item option optional
         ),
     async execute(interaction) {
         const item = interaction.options.getString('item');
@@ -184,53 +184,54 @@ const profit = {
             return;
         }
 
-        // Query to calculate profit for the specified item
+        // Query to calculate combined profit for all items or a specific item
+        let profitQuery = `
+            SELECT 
+                SUM(CASE WHEN t.type = ${SaleType.NonInstantBuy} THEN t.price ELSE 0 END) AS total_purchases,
+                SUM(CASE WHEN t.type = ${SaleType.InstantBuy} THEN t.price ELSE 0 END) AS total_sales
+            FROM trades t
+            JOIN items i ON t.itemid = i.id
+            WHERE t.userid = ${userId[0].id}
+        `;
+
+        // Add item filter if an item is provided
+        if (item) {
+            profitQuery += ` AND i.itemname LIKE '%${item}%'`;
+        }
+
         let profitResult = await new Promise((resolve, reject) => {
-            connection.query(
-                `SELECT 
-                    i.itemname,
-                    SUM(CASE WHEN t.type = ${SaleType.NonInstantBuy} THEN t.price ELSE 0 END) AS total_purchases,
-                    SUM(CASE WHEN t.type = ${SaleType.InstantBuy} THEN t.price ELSE 0 END) AS total_sales,
-                    SUM(CASE WHEN t.type = ${SaleType.InstantBuy} THEN t.price ELSE 0 END) - 
-                    SUM(CASE WHEN t.type = ${SaleType.NonInstantBuy} THEN t.price ELSE 0 END) AS profit
-                FROM trades t
-                JOIN items i ON t.itemid = i.id
-                WHERE t.userid = ${userId[0].id} AND i.itemname LIKE '%${item}%'
-                GROUP BY t.itemid`,
-                (error, results) => {
-                    if (error) {
-                        console.error('Error executing query:', error);
-                        reject(error);
-                    } else {
-                        resolve(results);
-                    }
+            connection.query(profitQuery, (error, results) => {
+                if (error) {
+                    console.error('Error executing query:', error);
+                    reject(error);
+                } else {
+                    resolve(results);
                 }
-            );
+            });
         });
 
-        if (profitResult.length === 0) {
-            await interaction.reply('No trades found for the specified item.');
+        if (profitResult.length === 0 || !profitResult[0].total_purchases && !profitResult[0].total_sales) {
+            await interaction.reply(item ? `No trades found for the item "${item}".` : 'No trades found.');
             return;
         }
 
-        const { itemname, total_purchases, total_sales, profit } = profitResult[0];
+        const { total_purchases, total_sales } = profitResult[0];
 
-        //sales - (sales * 0.02)
-        // Calculate profit considering the 2% fee for sales
+        // Calculate adjusted sales considering the 2% fee
         const adjusted_sales = total_sales - (total_sales * 0.02);
+        const adjustedProfit = adjusted_sales - total_purchases;
 
+        // Build the response message
+        const response = item
+            ? `Combined profit for item "${item}":\n`
+            : `Combined profit for all items:\n`;
 
-        let adjustedProfit = adjusted_sales - total_purchases;
-        adjustedProfit = formatProfit(adjustedProfit); // Format profit for better readability
-        //format profit 6 zeros becomes M, 3 zeros becomes K
         await interaction.reply(
-            `Profit for item "${itemname}":\n` +
-            `- Total Purchases: ${total_purchases}\n` +
-            `- Total Sales: ${adjusted_sales}\n` +
-            `- Net Profit: ${adjustedProfit }\n`
+            response +
+            `- Total Purchases: ${formatGpToDiscord(total_purchases)}\n` +
+            `- Total Sales (after 2% fee): ${formatGpToDiscord(adjusted_sales)}\n` +
+            `- Net Profit: ${formatGpToDiscord(adjustedProfit)}`
         );
-
-
     },
 };
 
@@ -249,7 +250,7 @@ async function insertUserIfNotExists(userId) {
 }
 
 //method to format profit
-function formatProfit(profit) {
+function formatGpToDiscord(profit) {
     if (profit >= 1000000) {
         return `${(profit / 1000000).toFixed(2)}M`;
     } else if (profit >= 1000) {
